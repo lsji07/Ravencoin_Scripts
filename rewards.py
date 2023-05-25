@@ -1,3 +1,5 @@
+__version__ = "1.0.1"
+
 # This script is to help people generally easily issue rewards to their asset holders on Ravencoin.
 
 # The script takes some user input and setup and can help you get familiar with Ravencoin and RPC connections.
@@ -72,12 +74,13 @@ def test_rpc_connection(rpc_connection):
         chain = blockchain_info.get("chain")
         verification_progress = blockchain_info.get("verificationprogress")
 
-        if chain == "main" and verification_progress > 0.98:
-            logging.info("RPC connection successful.")
-            return True
-        else:
-            logging.warning("RPC connection successful, but the chain is not main or verification progress is not sufficient.")
+        if verification_progress <= 0.98:
+            logging.warning("RPC connection successful, but verification progress is not sufficient.")
             return False
+
+        network = chain
+        logging.info(f"RPC connection to {network} network successful.")
+        return True
 
     except JSONRPCException as e:
         logging.error(f"RPC error occurred: {str(e)}")
@@ -85,6 +88,7 @@ def test_rpc_connection(rpc_connection):
     except Exception as e:
         logging.error(f"Unexpected error occurred: {str(e)}")
         return False
+
 
 # Function to initialize the database
 def initialize_database(conn):
