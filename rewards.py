@@ -15,7 +15,6 @@ import os
 import logging
 import getpass
 import sqlite3
-import logging
 from decimal import Decimal
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
