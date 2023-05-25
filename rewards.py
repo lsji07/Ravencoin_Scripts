@@ -15,6 +15,7 @@ import os
 import logging
 import getpass
 import sqlite3
+import logging
 from decimal import Decimal
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
@@ -52,7 +53,12 @@ BURN_ADDRESSES = [
 ]
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG, format='%(levelname)s: %(message)s')
+logging.basicConfig(
+    level=logging.INFO,  # Set the logging level to INFO
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Set the logging format
+    filename='rewards.log',  # Set the filename for the log file
+    filemode='w'  # Set the file mode to write (overwrites existing log files)
+)
 
 # Connect to the SQLite database
 conn = sqlite3.connect('rewards.db')
@@ -68,15 +74,17 @@ def test_rpc_connection(rpc_connection):
         verification_progress = blockchain_info.get("verificationprogress")
 
         if chain == "main" and verification_progress > 0.98:
-            print("RPC connection successful.")
+            logging.info("RPC connection successful.")
             return True
         else:
-            print("RPC connection successful, but the chain is not main or verification progress is not sufficient.")
+            logging.warning("RPC connection successful, but the chain is not main or verification progress is not sufficient.")
             return False
 
     except JSONRPCException as e:
-        logging.error("RPC error occurred: {}".format(str(e)))
-        print("RPC error occurred. Please check the logs for details.")
+        logging.error(f"RPC error occurred: {str(e)}")
+        return False
+    except Exception as e:
+        logging.error(f"Unexpected error occurred: {str(e)}")
         return False
 
 # Function to initialize the database
@@ -345,4 +353,8 @@ def main():
 
 # This makes the main function the focus of the script if the user runs it directly but does allow the initial variables to interact.
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+        logging.info("Script executed successfully.")
+    except Exception as e:
+        logging.error(f"Unexpected error occurred during script execution: {str(e)}")
