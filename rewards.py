@@ -1,6 +1,12 @@
-__version__ = "1.0.1"
+"""
+Tool 001 - Rewards Script
 
-# This script is to help people generally easily issue rewards to their asset holders on Ravencoin.
+This script is to help people generally easily issue reward assets to their asset holders on Ravencoin.
+
+Version: 1.0.2
+Initial Author: LSJI07
+Contributor: cerberuscx
+"""
 
 # The script takes some user input and setup and can help you get familiar with Ravencoin and RPC connections.
 
@@ -8,7 +14,11 @@ __version__ = "1.0.1"
 
 # The intent is to assist issuers of assets to more easily issue Ravencoin assets as rewards to existing holders of tokens.
 
-# Install the required depends using the below. On windows systems ensure python is installed. Tested using version 3.10. 
+# Install the required depends using the below. On windows systems ensure python is installed. 
+
+# Tested using Python version 3.10. 
+
+# Ensure the below dependancies are available.
 
 # pip install bitcoinrpc
 # pip install sqlite3
@@ -31,11 +41,11 @@ from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 # Update the below to match your raven.config file to allow the python script and node to communicate.
 rpc_user = 'ravencoinlover'
 rpc_pass = 'kakawww'
-rpc_port = 8766 # default port for main net.
+rpc_port = 8766 # default port for main net. 18766 for testnet.
 
 # Set the reward asset name and other settings
 rewards_asset_name = "INDYBOWS/THANK_YOU" # This is the reward asset to be rewarded to existing token holders.
-asset_names_to_find = ["INDYBOWS"] # This is the asset that will be searched to find asset holders. This could be a main or su asset. Always use the full "MAINASSET/SUBASSET" 
+asset_names_to_find = ["INDYBOWS"] # This is the asset that will be searched to find asset holders. This could be a main or sub asset. Always use the full "MAINASSET/SUBASSET" 
 reward_asset_qty_per_reward_asset = Decimal(2) # This is the quantity of the reward to be issued to each of the valid asset holders. Change the number to reward the actual quantity per held asset. 
 
 # Burn address list to check that no rewarded assets go to burn addresses. User could add addresses here that they want to exclude from rewards.
@@ -50,7 +60,17 @@ BURN_ADDRESSES = [
     "RXissueMsgChanneLAssetXXXXXXSjHvAY",
     "RXissueSubQuaLifierXXXXXXXXXVTzvv5",
     "RXaddTagBurnXXXXXXXXXXXXXXXXZQm5ya",
-    "RVNAssetHoLeXXXXXXXXXXXXXXXXZCEMy6"
+    "RVNAssetHoLeXXXXXXXXXXXXXXXXZCEMy6",
+    "n1issueAssetXXXXXXXXXXXXXXXXWdnemQ",
+    "n1issueQuaLifierXXXXXXXXXXXXUysLTj",
+    "n1issueRestrictedXXXXXXXXXXXXZVT9V",
+    "n1issueSubAssetXXXXXXXXXXXXXbNiH6v",
+    "n1ReissueAssetXXXXXXXXXXXXXXWG9NLd",
+    "n1issueMsgChanneLAssetXXXXXXT2PBdD",
+    "n1issueSubQuaLifierXXXXXXXXXYffPLh",
+    "n1issueUniqueAssetXXXXXXXXXXS4695i",
+    "n1addTagBurnXXXXXXXXXXXXXXXXX5oLMH",
+    "n1BurnXXXXXXXXXXXXXXXXXXXXXXU1qejP"
 ]
 
 # Set up logging
