@@ -1,14 +1,12 @@
-"""
-Tool 001 - Rewards Script
+# Tool 001 - Rewards Script
 
-This script is to help people generally easily issue reward assets to their asset holders on Ravencoin.
+# This script is to help people generally easily issue reward assets to their asset holders on Ravencoin.
 
-Version: 1.0.2
-Initial Author: LSJI07
-Contributor: cerberuscx
-"""
+# Version: 1.0.3
+# Initial Author: LSJI07
+# Contributor: cereberuscx
 
-# The script takes some user input and setup and can help you get familiar with Ravencoin and RPC connections.
+# The script takes some user input and setup and in intended to help you get familiar with Ravencoin and RPC connections.
 
 # This script should work on UNIX and windows systems. I specifically avoided using imports that are not cross compatible.
 
@@ -77,8 +75,10 @@ BURN_ADDRESSES = [
 logging.basicConfig(
     level=logging.INFO,  # Set the logging level to INFO
     format='%(asctime)s - %(levelname)s - %(message)s',  # Set the logging format
-    filename='rewards.log',  # Set the filename for the log file
-    filemode='w'  # Set the file mode to write (overwrites existing log files)
+    handlers=[
+        logging.StreamHandler(),  # Print log messages to the console
+        logging.FileHandler('rewards.log', mode='w')  # Save log messages to the log file
+    ]
 )
 
 # Connect to the SQLite database
@@ -173,12 +173,12 @@ def display_reward_assets(conn):
     logger = logging.getLogger(__name__)
 
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT asset_name, CASE WHEN type IS NULL OR type = 'unrewarded' THEN 'Unrewarded Asset' ELSE 'Rewarded Asset' END AS asset_type FROM assets")
+    cursor.execute("SELECT asset_name, CASE WHEN type IS NULL OR type = 'unrewarded' THEN 'Unrewarded Asset' ELSE 'Rewarded Asset' END AS asset_type FROM assets")
     reward_assets = cursor.fetchall()
 
     printed_assets = set()
     if reward_assets:
-        logger.debug("Current Reward Assets:")
+        logger.info("Current Reward Assets:")
         for index, asset in enumerate(reward_assets, start=1):
             asset_name = asset[0]
             asset_type = asset[1]
@@ -186,7 +186,7 @@ def display_reward_assets(conn):
                 printed_assets.add(asset_name)
                 logger.debug("{}. {} - {}".format(index, asset_name, asset_type))
     else:
-        logger.debug("No reward assets found.")
+        logger.info("No reward assets found.")
 
     cursor.close()
 
@@ -229,48 +229,52 @@ def get_planned_transfers(conn, rpc_connection, rewards_asset_name, reward_asset
 
 # Function to display Planned Transfers to the user on the console.
 def display_planned_transfers(planned_transfers, rewards_asset_name):
-    print("Planned Transfers:")
+    logging.info("Planned Transfers:")
     for asset_name, transfer_list in planned_transfers.items():
-        print("Asset Being Rewarded: {}".format(asset_name))
-        print("Reward Asset: {}".format(rewards_asset_name))
+        logging.info("Asset Being Rewarded: {}".format(asset_name))
+        logging.info("Reward Asset: {}".format(rewards_asset_name))
         for transfer_info in transfer_list:
-            print("Address: {}".format(transfer_info['address']))
-            print("Quantity: {}".format(transfer_info['quantity']))
-        print()
+            logging.info("Address: {}".format(transfer_info['address']))
+            logging.info("Quantity: {}".format(transfer_info['quantity']))
+        logging.info("")
 
-# Function to distributed reward assets to rewarded asset holders.
+# Function to distribute reward assets to rewarded asset holders.
 def distribute_rewards(conn, rpc_connection, rewards_asset_name, planned_transfers):
     txid_list = []
 
-    print("Planned Transfers:")
+    logging.info("Planned Transfers:")
     for asset_name, transfer_list in planned_transfers.items():
-        print("Asset Being Rewarded: {}".format(asset_name))
-        print("Reward Asset: {}".format(rewards_asset_name))
+        logging.info("Asset Being Rewarded: {}".format(asset_name))
+        logging.info("Reward Asset: {}".format(rewards_asset_name))
         for transfer_info in transfer_list:
-            print("Address: {}".format(transfer_info['address']))
-            print("Quantity: {}".format(transfer_info['quantity']))
+            logging.info("Address: {}".format(transfer_info['address']))
+            logging.info("Quantity: {}".format(transfer_info['quantity']))
 
             try:
                 wallet_info = rpc_connection.getwalletinfo()
-                unlocked_until = wallet_info.get("unlocked_until", 0)
-                is_locked = unlocked_until == 0
+                unlocked_until = wallet_info.get("unlocked_until")
 
-                if is_locked:
-                    print("Wallet is locked. Please provide the password to unlock the wallet.")
+                if unlocked_until is None or unlocked_until > 0:
+                    logging.debug("Wallet is unlocked.")
+                else:
+                    logging.info("Wallet is locked. Please provide the password to unlock the wallet.")
                     password = getpass.getpass("Enter the wallet password: ")
 
                     # Unlock the wallet
                     rpc_connection.walletpassphrase(password, 60)  # Unlock for 60 seconds (adjust as needed)
-                    print("Wallet unlocked successfully.")
+                    logging.info("Wallet unlocked successfully.")
 
                 txid = rpc_connection.transfer(rewards_asset_name, transfer_info["quantity"], transfer_info["address"])
                 txid_list.append(txid)
-                print("Transaction ID: {}".format(txid))
+                logging.info("Transaction ID: {}".format(txid))
             except Exception as e:
-                print("Error transferring {} to {}: {}".format(
+                logging.error("Error transferring {} to {}: {}".format(
                     transfer_info["quantity"], rewards_asset_name, transfer_info["address"], str(e)))
 
-            print()
+                # Raise the exception to halt further processing if desired
+                raise
+
+            logging.info("")
 
     return txid_list
 
@@ -321,7 +325,7 @@ def main():
     elif all_asset_types.lower() == 'u':
         new_type = 'unrewarded'
     else:
-        print("Invalid option. Skipping updating all asset types.")
+        logging.info("Invalid option. Skipping updating all asset types.")
 
     # Update all asset types at once
     if new_type:
@@ -347,7 +351,7 @@ def main():
 
             # Validate new_type input
             if new_type.lower() not in ['r', 'u']:
-                print("Invalid option. Skipping updating asset type.")
+                logging.info("Invalid option. Skipping updating asset type.")
                 continue
 
             # Map new_type input to rewarded or unrewarded
