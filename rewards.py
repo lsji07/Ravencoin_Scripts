@@ -2,7 +2,7 @@
 
 # This script is to help people generally easily issue reward assets to their asset holders on Ravencoin.
 
-# Version: 1.0.3
+# Version: 1.0.4
 # Initial Author: LSJI07
 # Contributor: cereberuscx
 
@@ -25,6 +25,7 @@ import os
 import logging
 import getpass
 import sqlite3
+from tqdm import tqdm
 from decimal import Decimal
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
@@ -146,19 +147,21 @@ def fetch_reward_assets(conn, rpc_connection, asset_names_to_find):
         existing_asset = cursor.fetchone()
 
         if existing_asset:
-            # Asset name already exists, update the existing row
-            cursor.execute("UPDATE assets SET asset_name = ? WHERE id = ?", (asset_name, existing_asset[0]))
-        else:
-            # Asset name doesn't exist, create a new row
-            cursor.execute("INSERT INTO assets (asset_name) VALUES (?)", (asset_name,))
+            # Asset name already exists, skip inserting/updating
+            continue
 
-    conn.commit()
-
-    # Retrieve addresses and asset quantities for each asset name
-    for asset_name in asset_names:
+        # Retrieve addresses and asset quantities for the asset name
         asset_info = rpc_connection.listaddressesbyasset(asset_name)
         for address, quantity in asset_info.items():
-            # Save the address and asset quantity to the database
+            # Check if the asset name, address, and quantity already exist in the database
+            cursor.execute("SELECT * FROM assets WHERE asset_name = ? AND address = ? AND quantity = ?",
+                           (asset_name, address, quantity))
+
+            if cursor.fetchone():
+                # Asset name, address, and quantity already exist, skip inserting/updating
+                continue
+
+            # Insert the asset name, address, and quantity into the database
             cursor.execute("INSERT INTO assets (asset_name, address, quantity) VALUES (?, ?, ?)",
                            (asset_name, address, quantity))
 
@@ -190,7 +193,6 @@ def display_reward_assets(conn):
 
     cursor.close()
 
-
 # Function to edit the type of specific assets between rewarded and unrewarded.
 def edit_asset_type(conn, asset_to_edit, new_type):
     cursor = conn.cursor()
@@ -204,16 +206,18 @@ def edit_asset_type(conn, asset_to_edit, new_type):
     finally:
         cursor.close()
 
-# Function to get planned transfer information from the database.
-def get_planned_transfers(conn, rpc_connection, rewards_asset_name, reward_asset_qty_per_reward_asset):
+# Function to get planned transfers marked as rewarded in the database.
+def get_planned_transfers(conn, reward_asset_qty_per_reward_asset):
     planned_transfers = {}
 
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT asset_name, address, quantity, type FROM assets WHERE type = 'rewarded'")
+        "SELECT asset_name, address, quantity FROM assets WHERE type = 'rewarded' AND txid IS NULL")
     asset_info = cursor.fetchall()
 
-    for asset_name, address, quantity, _ in asset_info:
+    for row in asset_info:
+        asset_name, address, quantity = row
+
         if asset_name not in planned_transfers:
             planned_transfers[asset_name] = []
 
@@ -222,33 +226,60 @@ def get_planned_transfers(conn, rpc_connection, rewards_asset_name, reward_asset
             'address': address,
             'quantity': quantity * reward_asset_qty_per_reward_asset
         }
-        planned_transfers[asset_name].append(transfer_info)
+
+        # Check for duplicate entries
+        if transfer_info not in planned_transfers[asset_name]:
+            planned_transfers[asset_name].append(transfer_info)
 
     cursor.close()
     return planned_transfers
 
-# Function to display Planned Transfers to the user on the console.
+# Function to display planned transfers to the user.
 def display_planned_transfers(planned_transfers, rewards_asset_name):
     logging.info("Planned Transfers:")
-    for asset_name, transfer_list in planned_transfers.items():
-        logging.info("Asset Being Rewarded: {}".format(asset_name))
-        logging.info("Reward Asset: {}".format(rewards_asset_name))
-        for transfer_info in transfer_list:
-            logging.info("Address: {}".format(transfer_info['address']))
-            logging.info("Quantity: {}".format(transfer_info['quantity']))
-        logging.info("")
+    for asset_name, transfers in planned_transfers.items():
+        logging.info(f"Asset: {asset_name}")
+        for transfer in transfers:
+            address = transfer['address']
+            quantity = transfer['quantity']
+            logging.info(f" - To: {address}")
+            logging.info(f"   Quantity: {quantity} {rewards_asset_name}")
 
-# Function to distribute reward assets to rewarded asset holders.
+
+# Function to save the txid to the database (this needs additional testing and better logging and error handling)
+def update_txid(conn, asset_name, address, adjusted_quantity, txid):
+    cursor = conn.cursor()
+
+    sql = "UPDATE assets SET txid = ? WHERE asset_name = ? AND address = ? AND quantity = ? AND type = 'rewarded'"
+    values = (txid, asset_name, address, str(adjusted_quantity))  # Convert quantity to string
+
+    try:
+        cursor.execute(sql, values)
+        conn.commit()
+        logging.debug("Transaction ID updated successfully.")
+    except Exception as e:
+        logging.error("Error updating transaction ID: {}".format(str(e)))
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+
+# Function to distribute rewards.
 def distribute_rewards(conn, rpc_connection, rewards_asset_name, planned_transfers):
     txid_list = []
 
-    logging.info("Planned Transfers:")
+    total_transfers = sum(len(transfers) for transfers in planned_transfers.values())
+
+    # Create the progress bar without displaying it immediately
+    progress_bar = tqdm(total=total_transfers, desc='Distributing rewards', unit='transfer', leave=False, bar_format='{l_bar}{bar}{r_bar}')
+
     for asset_name, transfer_list in planned_transfers.items():
         logging.info("Asset Being Rewarded: {}".format(asset_name))
         logging.info("Reward Asset: {}".format(rewards_asset_name))
+
         for transfer_info in transfer_list:
-            logging.info("Address: {}".format(transfer_info['address']))
-            logging.info("Quantity: {}".format(transfer_info['quantity']))
+            logging.debug("Address: {}".format(transfer_info['address']))
+            logging.debug("Quantity: {}".format(transfer_info['quantity']))
 
             try:
                 wallet_info = rpc_connection.getwalletinfo()
@@ -264,26 +295,32 @@ def distribute_rewards(conn, rpc_connection, rewards_asset_name, planned_transfe
                     rpc_connection.walletpassphrase(password, 60)  # Unlock for 60 seconds (adjust as needed)
                     logging.info("Wallet unlocked successfully.")
 
-                txid = rpc_connection.transfer(rewards_asset_name, transfer_info["quantity"], transfer_info["address"])
+                txid = str(rpc_connection.transfer(rewards_asset_name, transfer_info["quantity"], transfer_info["address"]))
                 txid_list.append(txid)
-                logging.info("Transaction ID: {}".format(txid))
+                logging.debug("Transaction ID: {}".format(txid))
+
+                # Calculate the adjusted quantity back to the database quantity for matching transactions.
+                adjusted_quantity = Decimal(transfer_info["quantity"]) / Decimal(reward_asset_qty_per_reward_asset)
+
+                # Save the txid to the database
+                update_txid(conn, asset_name, transfer_info["address"], Decimal(adjusted_quantity), txid)
+
             except Exception as e:
-                logging.error("Error transferring {} to {}: {}".format(
+                logging.error("Error transferring {} to {}: {}: {}".format(
                     transfer_info["quantity"], rewards_asset_name, transfer_info["address"], str(e)))
 
                 # Raise the exception to halt further processing if desired
                 raise
 
-            logging.info("")
+            progress_bar.update(1)
+
+    # Close the progress bar after all transfers
+    progress_bar.close()
+
+    # Print an empty line to separate the progress bar from the subsequent output
+    print()
 
     return txid_list
-
-# Function to save the txid to the database (this needs additional testing and better logging and error handling)
-def save_txid(conn, asset_name, txid):
-    cursor = conn.cursor()
-    cursor.execute("UPDATE assets SET txid = ? WHERE name = ?", (txid, asset_name))
-    conn.commit()
-    cursor.close()
 
 # Function to save a receipt file of transactions carried out in a format that most people can access. A .txt file. 
 # (This needs additional logging and better error handling)
@@ -302,6 +339,19 @@ def save_receipt_file(txid_list, planned_transfers, rewards_asset_name):
         for txid in txid_list:
             file.write("{}\n".format(txid))
 
+def has_existing_txids(conn):
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM assets WHERE txid IS NOT NULL")
+    count = cursor.fetchone()[0]
+    cursor.close()
+    return count > 0
+
+def clear_txids(conn):
+    cursor = conn.cursor()
+    cursor.execute("UPDATE assets SET txid = NULL WHERE txid IS NOT NULL")
+    conn.commit()
+    cursor.close()
+
 # Main function
 def main():
     # Initialize the database if necessary
@@ -318,24 +368,40 @@ def main():
     # Display current reward assets
     display_reward_assets(conn)
 
-    # Prompt the user to update all asset types at once
-    all_asset_types = input("Enter 'r' for rewarded or 'u' for unrewarded to update all asset types: ")
-    if all_asset_types.lower() == 'r':
-        new_type = 'rewarded'
-    elif all_asset_types.lower() == 'u':
-        new_type = 'unrewarded'
+    # Check if there are any existing txids
+    if has_existing_txids(conn):
+        while True:
+            choice = input("Existing transaction IDs found. Do you want to continue the existing distribution? (Y/N): ")
+            if choice.upper() == 'Y':
+                # Continue with existing distribution
+                logging.info("Continuing with existing distribution.")
+                break
+            elif choice.upper() == 'N':
+                # Abandon existing distribution
+                logging.info("Abandoning existing distribution.")
+                clear_txids(conn)
+                break
+            else:
+                logging.info("Invalid option. Please choose 'Y' or 'N'.")
     else:
-        logging.info("Invalid option. Skipping updating all asset types.")
+        # Prompt the user to update all asset types at once
+        all_asset_types = input("Enter 'r' for rewarded or 'u' for unrewarded to update all asset types: ")
+        if all_asset_types.lower() == 'r':
+            new_type = 'rewarded'
+        elif all_asset_types.lower() == 'u':
+            new_type = 'unrewarded'
+        else:
+            logging.info("Invalid option. Skipping updating all asset types.")
 
-    # Update all asset types at once
-    if new_type:
-        cursor = conn.cursor()
-        cursor.execute("UPDATE assets SET type = ?", (new_type,))
-        conn.commit()
-        cursor.close()
+        # Update all asset types at once
+        if new_type:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE assets SET type = ?", (new_type,))
+            conn.commit()
+            cursor.close()
 
-    # Display updated reward assets list
-    display_reward_assets(conn)
+        # Display updated reward assets list
+        display_reward_assets(conn)
 
     # Prompt the user to update individual asset types
     asset_names_input = input("Enter asset names to update their types (separated by commas) (or enter 'c' to continue): ")
@@ -364,7 +430,7 @@ def main():
     display_reward_assets(conn)
 
     # Get planned transfers
-    planned_transfers = get_planned_transfers(conn, rpc_connection, rewards_asset_name, reward_asset_qty_per_reward_asset)
+    planned_transfers = get_planned_transfers(conn, reward_asset_qty_per_reward_asset)
 
     # Display planned transfers
     display_planned_transfers(planned_transfers, rewards_asset_name)
